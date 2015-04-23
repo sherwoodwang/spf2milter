@@ -8,9 +8,11 @@
 #include <netinet/in.h>
 #include <pwd.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <libmilter/mfapi.h>
@@ -48,8 +50,6 @@ static sfsistat spf2milter_connect(SMFICTX *ctx, char *hostname,
         _SOCK_ADDR *hostaddr)
 {
     struct spf2milter_context *spfctx;
-    struct sockaddr_in *addr;
-    struct sockaddr_in6 *addr6;
 
     if (addr_whitelist_check(whitelist, hostaddr)) {
         goto cont;
@@ -191,7 +191,7 @@ cont:
     return SMFIS_CONTINUE;
 }
 
-static int childpid;
+static int childpid = 0;
 
 static void killchild(int sig)
 {
@@ -374,26 +374,40 @@ spawn_child:
     }
 
     if (pid) {
+        siginfo_t info;
+
+        rmsocket = 1;
+
         while (1) {
-            if (wait(ret) == -1) {
+            if (waitid(P_PID, pid, &info, WEXITED) == -1) {
                 if (errno == EINTR) {
                     continue;
                 } else if (errno == ECHILD) {
-                    return 0;
+                    goto spawn_child;
                 } else {
                     fprintf(stderr, "wait: %s\n", strerror(errno));
                     return EXIT_UNAVAILIBLE;
                 }
             }
 
-            if (WIFEXITED(ret)) {
-                return WEXITSTATUS(ret);
-            } else if (WIFSIGNALED(ret)) {
-                rmsocket = 1;
-                goto spawn_child;
+            switch (info.si_code) {
+                case CLD_EXITED:
+                    return info.si_status;
+
+                case CLD_KILLED:
+                case CLD_DUMPED:
+                    goto spawn_child;
+
+                default:
+                    return EXIT_UNAVAILIBLE;
             }
         }
     } else {
+        if (prctl(PR_SET_PDEATHSIG, SIGTERM) == -1) {
+            fprintf(stderr, "Failed to setup PR_SET_PDEATHSIG\n");
+            return EXIT_UNAVAILIBLE;
+        }
+
         if (smfi_opensocket(rmsocket) == MI_FAILURE) {
             fprintf(stderr, "Failed to create socket\n");
             return EXIT_UNAVAILIBLE;

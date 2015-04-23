@@ -1,0 +1,9 @@
+Makefile
+/autom4te.cache
+/config.h
+/config.log
+/config.status
+/src/spf2milter
+/stamp-h1
+.deps
+*.o
