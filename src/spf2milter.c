@@ -51,6 +51,10 @@ static sfsistat spf2milter_connect(SMFICTX *ctx, char *hostname,
 {
     struct spf2milter_context *spfctx;
 
+    if (!(hostaddr->sa_family == AF_INET || hostaddr->sa_family == AF_INET6)) {
+        goto cont;
+    }
+
     if (addr_whitelist_check(whitelist, hostaddr)) {
         goto cont;
     }
